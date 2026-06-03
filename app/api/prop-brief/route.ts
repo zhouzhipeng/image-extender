@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  callGeminiGenerateContent,
+  extractGeminiText,
+  GeminiApiError,
+  resolveGeminiApiKey,
+  resolveGeminiModel,
+} from '@/app/api/_lib/gemini'
 
 // ART DIRECTOR — call #1 of the two-call props pipeline.
 //
@@ -9,8 +16,6 @@ import { NextRequest, NextResponse } from 'next/server'
 // from rendering (image) is what stops the "same loop" of lanterns/nests/pots:
 // a reasoning model can deliberately reach for fresh kinds, an image model
 // cannot.
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
-
 const artStyleDescriptions: Record<string, string> = {
   cinematic: 'cinematic photography with dramatic lighting and film grain',
   vintage: 'vintage film photography with faded colors and retro feel',
@@ -104,20 +109,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing biome prompt' }, { status: 400 })
     }
 
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
+    const geminiKey = resolveGeminiApiKey(apiKey)
 
-    if (!openRouterKey) {
+    if (!geminiKey) {
       return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
+        { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
 
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
+    const modelId = resolveGeminiModel(model)
 
     const n = Math.max(1, Math.min(24, Math.round(Number(count) || 8)))
     const existingList: string[] = Array.isArray(existing)
@@ -157,46 +158,33 @@ Output STRICT JSON only — no prose, no markdown fences. Schema:
 
 Propose ${n} brand-new decoration props as strict JSON.`
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Prop Art Director',
-      },
-      body: JSON.stringify({
+    let data: unknown
+    try {
+      data = await callGeminiGenerateContent({
+        apiKey: geminiKey,
         model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+        parts: [
+          { text: `System instructions:\n${systemPrompt}` },
+          { text: userPrompt },
         ],
-        max_tokens: 900,
-        // High temperature: this is the CREATIVE step. We want it reaching for
-        // novel kinds, not playing it safe.
-        temperature: 1.0,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to generate prop brief' },
-        { status: response.status }
-      )
+        generationConfig: {
+          maxOutputTokens: 900,
+          // High temperature: this is the CREATIVE step. We want it reaching for
+          // novel kinds, not playing it safe.
+          temperature: 1.0,
+        },
+      })
+    } catch (error) {
+      if (error instanceof GeminiApiError) {
+        return NextResponse.json(
+          { error: error.message || 'Failed to generate prop brief' },
+          { status: error.status }
+        )
+      }
+      throw error
     }
 
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-    const raw =
-      typeof content === 'string'
-        ? content
-        : Array.isArray(content)
-          ? content
-              .map((p: { text?: string }) => (typeof p?.text === 'string' ? p.text : ''))
-              .join('')
-          : ''
-
+    const raw = extractGeminiText(data)
     const ideas = parseIdeas(raw).slice(0, n)
     if (ideas.length === 0) {
       return NextResponse.json(

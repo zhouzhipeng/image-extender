@@ -1,4 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  callGeminiGenerateContent,
+  dataUrlToGeminiPart,
+  extractGeminiText,
+  GeminiApiError,
+  resolveGeminiApiKey,
+  resolveGeminiModel,
+  type GeminiPart,
+} from '@/app/api/_lib/gemini'
 
 // QA ART DIRECTOR for sprite sheets — the review half of the sprite pipeline.
 //
@@ -9,8 +18,6 @@ import { NextRequest, NextResponse } from 'next/server'
 // fringe, and whether they read as a coherent animation for the requested
 // action. If clean it approves; otherwise it returns a fix report the image
 // model uses to repaint the sheet (the locked anchor identity is preserved).
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
-
 // Per-body-plan animation expectations. The QA director judges the sheet
 // against the animation the user actually asked for, and the anatomy of the
 // body plan it belongs to (biped, quadruped, serpent, flyer, blob).
@@ -159,20 +166,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing sprite sheet image' }, { status: 400 })
     }
 
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
+    const geminiKey = resolveGeminiApiKey(apiKey)
 
-    if (!openRouterKey) {
+    if (!geminiKey) {
       return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
+        { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
 
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
+    const modelId = resolveGeminiModel(model)
 
     const planKey =
       typeof bodyPlan === 'string' && ANIM_EXPECTATION_BY_PLAN[bodyPlan]
@@ -247,52 +250,37 @@ Respond with STRICT JSON only — no prose, no markdown fences:
 
 Review the attached sprite sheet${hasAnchor ? ' against the character anchor' : ''} and return your verdict as strict JSON.`
 
-    const content: Array<Record<string, unknown>> = [
-      { type: 'image_url', image_url: { url: sheetImage } },
+    const parts: GeminiPart[] = [
+      { text: `System instructions:\n${systemPrompt}` },
+      dataUrlToGeminiPart(sheetImage),
     ]
     if (hasAnchor) {
-      content.push({ type: 'image_url', image_url: { url: anchorImage } })
+      parts.push(dataUrlToGeminiPart(anchorImage))
     }
-    content.push({ type: 'text', text: userText })
+    parts.push({ text: userText })
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Sprite QA',
-      },
-      body: JSON.stringify({
+    let data: unknown
+    try {
+      data = await callGeminiGenerateContent({
+        apiKey: geminiKey,
         model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content },
-        ],
-        max_tokens: 600,
-        temperature: 0.2,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to review sprite sheet' },
-        { status: response.status }
-      )
+        parts,
+        generationConfig: {
+          maxOutputTokens: 600,
+          temperature: 0.2,
+        },
+      })
+    } catch (error) {
+      if (error instanceof GeminiApiError) {
+        return NextResponse.json(
+          { error: error.message || 'Failed to review sprite sheet' },
+          { status: error.status }
+        )
+      }
+      throw error
     }
 
-    const data = await response.json()
-    const raw = data.choices?.[0]?.message?.content
-    const text =
-      typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw)
-          ? raw
-              .map((p: { text?: string }) => (typeof p?.text === 'string' ? p.text : ''))
-              .join('')
-          : ''
-
+    const text = extractGeminiText(data)
     const review = parseReview(text)
     if (!review) {
       // Don't block the user on a parse failure — treat as approved.

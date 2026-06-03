@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
+import {
+  callGeminiGenerateContent,
+  extractGeminiText,
+  GeminiApiError,
+  resolveGeminiApiKey,
+  resolveGeminiModel,
+} from '@/app/api/_lib/gemini'
 
 const artStyleDescriptions: Record<string, string> = {
   cinematic: 'cinematic photography with dramatic lighting and film grain',
@@ -33,20 +38,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
+    const geminiKey = resolveGeminiApiKey(apiKey)
 
-    if (!openRouterKey) {
+    if (!geminiKey) {
       return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
+        { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
 
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
+    const modelId = resolveGeminiModel(model)
 
     const styleLine =
       artStyle && artStyleDescriptions[artStyle]
@@ -67,47 +68,31 @@ Rules for your brief:
 
 Write the shared scene brief for all parallax layers.`
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Scene Brief',
-      },
-      body: JSON.stringify({
+    let data: unknown
+    try {
+      data = await callGeminiGenerateContent({
+        apiKey: geminiKey,
         model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+        parts: [
+          { text: `System instructions:\n${systemPrompt}` },
+          { text: userPrompt },
         ],
-        max_tokens: 400,
-        temperature: 0.4,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to generate scene brief' },
-        { status: response.status }
-      )
+        generationConfig: {
+          maxOutputTokens: 400,
+          temperature: 0.4,
+        },
+      })
+    } catch (error) {
+      if (error instanceof GeminiApiError) {
+        return NextResponse.json(
+          { error: error.message || 'Failed to generate scene brief' },
+          { status: error.status }
+        )
+      }
+      throw error
     }
 
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-    const sceneBrief =
-      typeof content === 'string'
-        ? content.trim()
-        : Array.isArray(content)
-          ? content
-              .map((p: { text?: string; type?: string }) =>
-                typeof p?.text === 'string' ? p.text : ''
-              )
-              .join('')
-              .trim()
-          : ''
-
+    const sceneBrief = extractGeminiText(data)
     if (!sceneBrief) {
       return NextResponse.json(
         { error: 'No scene brief returned from model' },

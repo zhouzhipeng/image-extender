@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const DEFAULT_MODEL = 'google/gemini-3.1-flash-image-preview'
+import {
+  callGeminiGenerateContent,
+  dataUrlToGeminiPart,
+  extractGeminiImage,
+  extractGeminiText,
+  GeminiApiError,
+  imageGenerationConfig,
+  resolveGeminiApiKey,
+  resolveGeminiModel,
+  type GeminiPart,
+} from '@/app/api/_lib/gemini'
 
 const SUPPORTED_IMAGE_ASPECT_RATIOS = [
   '1:1',
@@ -77,18 +86,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const openRouterKey = (typeof apiKey === 'string' && apiKey.trim())
-      ? apiKey.trim()
-      : process.env.OPENROUTER_API_KEY
+    const geminiKey = resolveGeminiApiKey(apiKey)
 
-    if (!openRouterKey) {
+    if (!geminiKey) {
       return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
+        { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
 
-    const modelId = (typeof model === 'string' && model.trim()) ? model.trim() : DEFAULT_MODEL
+    const modelId = resolveGeminiModel(model)
 
     // Art style descriptions
     const artStyleDescriptions: { [key: string]: string } = {
@@ -1143,16 +1150,13 @@ ${
 
     fullPrompt += `\n\nIMPORTANT: Create a high-quality, detailed image at exactly ${width}x${height} pixels. The image should be complete and cohesive.`
 
-    const messageContent: any[] = []
+    const geminiParts: GeminiPart[] = []
     if (
       tileSheet === true &&
       typeof tileGuideImage === 'string' &&
       tileGuideImage.startsWith('data:image/')
     ) {
-      messageContent.push({
-        type: 'image_url',
-        image_url: { url: tileGuideImage },
-      })
+      geminiParts.push(dataUrlToGeminiPart(tileGuideImage))
     }
     // Props style reference — the existing library, so new batches / re-rolls
     // match palette + lighting while painting different decorations.
@@ -1161,10 +1165,7 @@ ${
       typeof propRefImage === 'string' &&
       propRefImage.startsWith('data:image/')
     ) {
-      messageContent.push({
-        type: 'image_url',
-        image_url: { url: propRefImage },
-      })
+      geminiParts.push(dataUrlToGeminiPart(propRefImage))
     }
     // Sprite-sheet pass references, attached IN ORDER so the prompt's
     // "IMAGE 1 / IMAGE 2" labels line up:
@@ -1182,134 +1183,57 @@ ${
       typeof spriteIdentityImage === 'string' &&
       spriteIdentityImage.startsWith('data:image/')
     ) {
-      messageContent.push({
-        type: 'image_url',
-        image_url: { url: spriteIdentityImage },
-      })
+      geminiParts.push(dataUrlToGeminiPart(spriteIdentityImage))
     }
     if (
       spriteSheet === true &&
       typeof spriteGuideImage === 'string' &&
       spriteGuideImage.startsWith('data:image/')
     ) {
-      messageContent.push({
-        type: 'image_url',
-        image_url: { url: spriteGuideImage },
-      })
+      geminiParts.push(dataUrlToGeminiPart(spriteGuideImage))
     }
-    messageContent.push({
-      type: 'text',
-      text: fullPrompt,
-    })
+    geminiParts.push({ text: fullPrompt })
 
-    // Call OpenRouter API with image generation model
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Generator',
-      },
-      body: JSON.stringify({
+    let data: unknown
+    try {
+      data = await callGeminiGenerateContent({
+        apiKey: geminiKey,
         model: modelId,
-        messages: [
-          {
-            role: 'user',
-            content: messageContent,
-          },
-        ],
-        modalities: ['image', 'text'],
-        // GPT image models are especially literal about the requested canvas
-        // aspect. If omitted, OpenRouter/model defaults can come back square;
-        // the client then normalizes that square into e.g. a 2048×1024 sprite
-        // sheet, visually stretching every frame. Always send the intended
-        // reduced aspect ratio (sprites are 2:1, square anchors are 1:1).
-        image_config: { aspect_ratio: supportedAspectRatioForSize(width, height) },
-        max_tokens: 2000,
-        // Low temperature on multi-cell sheet generation keeps the model
-        // disciplined about the grid layout + per-cell consistency.
-        // Sprite sheets need even lower temperature than tile sheets —
-        // 8 keyframes of the SAME character on one canvas amplifies any
-        // appearance drift between cells (flicker). 0.2 is the value
-        // most 2026 sprite-AI pipelines converged on.
-        temperature:
-          spriteSheet === true
-            ? 0.2
-            : tileSheet === true
-              ? 0.35
-              : propSheet === true
-                ? 0.6
-                : 0.7,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json()
-      console.error('OpenRouter API error:', errorData)
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to generate image' },
-        { status: response.status }
-      )
-    }
-
-    const data = await response.json()
-    const message = data.choices?.[0]?.message
-    
-    if (!message) {
-      return NextResponse.json(
-        { error: 'No message in response' },
-        { status: 500 }
-      )
-    }
-
-    // Extract image from response (same logic as extend route)
-    let imageUrl = null
-    
-    // Check if images array exists (Gemini 2.5 Flash format)
-    if (message.images && Array.isArray(message.images) && message.images.length > 0) {
-      const firstImage = message.images[0]
-      if (firstImage.image_url?.url) {
-        imageUrl = firstImage.image_url.url
+        parts: geminiParts,
+        generationConfig: {
+          ...imageGenerationConfig(
+            supportedAspectRatioForSize(width, height),
+            modelId
+          ),
+          maxOutputTokens: 2000,
+          // Low temperature on multi-cell sheet generation keeps the model
+          // disciplined about the grid layout + per-cell consistency.
+          // Sprite sheets need even lower temperature than tile sheets -
+          // 8 keyframes of the SAME character on one canvas amplifies any
+          // appearance drift between cells (flicker). 0.2 is the value
+          // most 2026 sprite-AI pipelines converged on.
+          temperature:
+            spriteSheet === true
+              ? 0.2
+              : tileSheet === true
+                ? 0.35
+                : propSheet === true
+                  ? 0.6
+                  : 0.7,
+        },
+      })
+    } catch (error) {
+      if (error instanceof GeminiApiError) {
+        console.error('Gemini API error:', error.status, error.message)
+        return NextResponse.json(
+          { error: error.message || 'Failed to generate image' },
+          { status: error.status }
+        )
       }
+      throw error
     }
-    
-    // If no image found in images array, check content
-    if (!imageUrl) {
-      const content = message.content
-      
-      if (Array.isArray(content)) {
-        for (const part of content) {
-          if (part.type === 'image_url' && part.image_url?.url) {
-            imageUrl = part.image_url.url
-            break
-          }
-          if (part.type === 'image' && part.url) {
-            imageUrl = part.url
-            break
-          }
-          if (part.image_url?.data) {
-            imageUrl = `data:image/png;base64,${part.image_url.data}`
-            break
-          }
-          if (part.data) {
-            imageUrl = `data:image/png;base64,${part.data}`
-            break
-          }
-          if (part.inline_data?.data) {
-            const mimeType = part.inline_data.mime_type || 'image/png'
-            imageUrl = `data:${mimeType};base64,${part.inline_data.data}`
-            break
-          }
-        }
-      } else if (typeof content === 'string') {
-        if (content.startsWith('data:image') || content.startsWith('http')) {
-          imageUrl = content
-        } else if (content.length > 100 && /^[A-Za-z0-9+/=]+$/.test(content.substring(0, 100))) {
-          imageUrl = `data:image/png;base64,${content}`
-        }
-      }
-    }
+
+    const imageUrl = extractGeminiImage(data)
 
     if (!imageUrl) {
       return NextResponse.json(
@@ -1323,21 +1247,7 @@ ${
     // de-dup list instead of shipping the whole library back as images.
     let names: string[] = []
     if (propSheet === true || propMode === true) {
-      let text = ''
-      const content = message.content
-      if (typeof content === 'string') {
-        text = content
-      } else if (Array.isArray(content)) {
-        text = content
-          .map((part: any) =>
-            typeof part === 'string'
-              ? part
-              : part?.type === 'text' && typeof part.text === 'string'
-                ? part.text
-                : ''
-          )
-          .join(' ')
-      }
+      const text = extractGeminiText(data)
       const m = text.match(/ITEMS?\s*:\s*(.+)/i)
       const raw = m ? m[1] : text
       names = raw

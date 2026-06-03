@@ -107,7 +107,7 @@ export function SettingsDrawer({
             </div>
           </Section>
 
-          <Section title="OpenRouter key">
+          <Section title="Gemini API key">
             {apiKey ? (
               <div
                 className="flex items-center gap-3 rounded-[var(--radius-sm)] p-3"
@@ -154,18 +154,18 @@ export function SettingsDrawer({
                 className="btn btn-secondary w-full justify-start"
               >
                 <Icons.Key size={14} />
-                Add OpenRouter key
+                Add Gemini API key
               </button>
             )}
             <p className="mt-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
               Stored only in this browser. Get one at{' '}
               <a
-                href="https://openrouter.ai/keys"
+                href="https://aistudio.google.com/app/apikey"
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--accent)' }}
               >
-                openrouter.ai/keys
+                Google AI Studio
               </a>
               .
             </p>
@@ -553,7 +553,7 @@ export function ApiKeyModal({
   if (!open) return null
 
   const trimmed = value.trim()
-  const looksValid = trimmed.startsWith('sk-or-') && trimmed.length > 20
+  const looksValid = trimmed.length >= 20
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 anim-fade">
@@ -581,7 +581,7 @@ export function ApiKeyModal({
           </div>
           <div className="flex-1">
             <h2 className="text-[15px] font-semibold tracking-tight">
-              {required ? 'Add your OpenRouter key' : 'OpenRouter API key'}
+              {required ? 'Add your Gemini API key' : 'Gemini API key'}
             </h2>
             <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
               Required to generate or extend images.
@@ -606,7 +606,7 @@ export function ApiKeyModal({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && looksValid) onSave(trimmed)
               }}
-              placeholder="sk-or-..."
+              placeholder="AIza..."
               className="field pr-10 font-mono text-[13px]"
             />
             <button
@@ -625,7 +625,7 @@ export function ApiKeyModal({
               style={{ color: 'var(--danger)' }}
             >
               <Icons.AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>OpenRouter keys start with <code className="font-mono">sk-or-</code>.</span>
+              <span>Enter a Gemini API key from Google AI Studio.</span>
             </div>
           )}
         </div>
@@ -639,17 +639,17 @@ export function ApiKeyModal({
           }}
         >
           Your key is stored only in this browser&apos;s <code className="font-mono">localStorage</code>.
-          It&apos;s sent with each request to your local server, which proxies it to OpenRouter — never logged, never persisted server-side.
+          It&apos;s sent with each request to your local server, which proxies it to Gemini - never logged, never persisted server-side.
         </div>
 
         <a
-          href="https://openrouter.ai/keys"
+          href="https://aistudio.google.com/app/apikey"
           target="_blank"
           rel="noopener noreferrer"
           className="mb-5 inline-flex items-center gap-1.5 text-[12px] transition-colors"
           style={{ color: 'var(--accent)' }}
         >
-          Get a key at openrouter.ai/keys
+          Get a key at Google AI Studio
           <Icons.External size={11} />
         </a>
 

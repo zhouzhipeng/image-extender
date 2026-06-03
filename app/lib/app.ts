@@ -38,11 +38,11 @@ export type Candidate = {
 export const EXTENSION_PERCENT = 38
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OpenRouter integration — BYOK (bring your own key) for open-source friendliness
+// Gemini integration - BYOK (bring your own key) for open-source friendliness
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export const STORAGE_KEY = 'extender:api_key'
+export const STORAGE_KEY = 'extender:gemini_api_key'
 
 export const STORAGE_MODEL = 'extender:model'
 

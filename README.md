@@ -5,11 +5,11 @@
 > decoration props) from the same studio.
 
 A small open-source web app for AI outpainting **and** 2D game-art generation.
-Powered by Google's Gemini image models via [OpenRouter](https://openrouter.ai),
+Powered by Google's Gemini image models through the direct Gemini API,
 with a Poisson-blending pipeline that hides the seam between original and
 AI-generated pixels, plus purpose-built pipelines for tiles, sprites, and props.
 
-Bring your own OpenRouter API key — it stays in your browser, never on the
+Bring your own Gemini API key — it stays in your browser, never on the
 server.
 
 ![A 1024² portrait shot extended into a cinematic wide-angle scene with no visible seam](docs/screenshots/after.png)
@@ -81,8 +81,8 @@ in the top bar:
   rising on the horizon"*.
 - **Custom art styles.** 40+ styles from cinematic and oil painting to
   Studio Ghibli, cyberpunk, vaporwave, etc.
-- **BYOK (Bring Your Own Key).** Your OpenRouter key is stored only in your
-  browser's `localStorage`. The server proxies your requests to OpenRouter
+- **BYOK (Bring Your Own Key).** Your Gemini API key is stored only in your
+  browser's `localStorage`. The server proxies your requests to Gemini API
   but never logs or persists the key.
 - **Model picker.** Switch between Gemini 3 Pro Image (Nano Banana Pro),
   Gemini 3 Flash Image (Nano Banana 2), and Gemini 2.5 Flash Image (Nano
@@ -342,18 +342,18 @@ enough that 1 attempt usually suffices.
 ## Quick start
 
 ```bash
-git clone https://github.com/boona13/image-extender.git
+git clone https://github.com/zhouzhipeng/image-extender.git
 cd image-extender
 npm install
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). On first load the app
-will prompt for your OpenRouter API key — paste it once, it's stored locally,
+will prompt for your Gemini API key — paste it once, it's stored locally,
 you'll never see the prompt again unless you clear it from Settings.
 
-Get a key at [openrouter.ai/keys](https://openrouter.ai/keys). It costs
-about **$0.03 per Gemini extension** (Nano Banana 2 Flash Image).
+Get a key at [Google AI Studio](https://aistudio.google.com/app/apikey).
+Gemini API pricing depends on the selected Nano Banana model.
 
 ### Optional: server-side env fallback
 
@@ -363,7 +363,7 @@ where you want to provide the key for visitors), copy `.env.example` to
 
 ```bash
 cp .env.example .env.local
-# edit .env.local and add your OPENROUTER_API_KEY
+# edit .env.local and add your GEMINI_API_KEY
 ```
 
 When set, the server will use this key for any request that doesn't
@@ -406,20 +406,18 @@ Optional custom prompt and art style live in the bottom command bar.
 - **HTML Canvas** for all client-side image manipulation
   ([app/utils/imageProcessor.ts](app/utils/imageProcessor.ts))
 - **[JSZip](https://stuk.github.io/jszip/)** for in-browser project bundling
-- **[OpenRouter](https://openrouter.ai)** for model access
-  - Image: `google/gemini-3.1-flash-image-preview` (Nano Banana 2, default),
-    `google/gemini-3-pro-image-preview` (Nano Banana Pro),
-    `google/gemini-2.5-flash-image` (Nano Banana), and
-    `openai/gpt-5.4-image-2` (GPT-5.4 Image 2 — high fidelity, slower)
-  - Reasoning / vision QA (scene brief, prop art director, tile review):
-    `google/gemini-2.0-flash-001`
+- **[Gemini API](https://ai.google.dev/gemini-api/docs)** for direct model access
+  - Image, text, and vision workflows use Nano Banana models only:
+    `gemini-3.1-flash-image` (Nano Banana 2, default),
+    `gemini-3-pro-image` (Nano Banana Pro), and
+    `gemini-2.5-flash-image` (Nano Banana).
 
 ## Project structure
 
 ```
 app/
 ├── api/
-│   ├── extend/route.ts        Outpainting endpoint (proxies OpenRouter)
+│   ├── extend/route.ts        Outpainting endpoint (proxies Gemini API)
 │   ├── generate/route.ts      Text-to-image + tile-sheet + sprite-sheet prompts
 │   ├── scene-brief/route.ts   Distill a shared scene brief for a project
 │   ├── prop-brief/route.ts    Props "art director" — invents the next prop batch
@@ -464,11 +462,11 @@ A few small values you might want to tune:
 
 ## Privacy & security
 
-- The OpenRouter API key entered in the UI is stored **only** in your
+- The Gemini API key entered in the UI is stored **only** in your
   browser's `localStorage`. It is never written to the server's disk and
   never logged. The server uses it once per request to proxy the call to
-  OpenRouter, then discards it.
-- The server-side `OPENROUTER_API_KEY` env var is **optional** and acts only
+  Gemini, then discards it.
+- The server-side `GEMINI_API_KEY` env var is **optional** and acts only
   as a fallback for requests that don't include a client-provided key.
 - No analytics, no telemetry, no tracking.
 
@@ -476,7 +474,7 @@ A few small values you might want to tune:
 
 - Poisson image editing technique: **Pérez, Gangnet, and Blake (2003) —
   "Poisson Image Editing"**, SIGGRAPH.
-- Google for the Gemini image models, OpenRouter for the unified API.
+- Google for the Gemini image models and direct Gemini API.
 
 ## License
 

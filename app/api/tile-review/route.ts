@@ -1,4 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  callGeminiGenerateContent,
+  dataUrlToGeminiPart,
+  extractGeminiText,
+  GeminiApiError,
+  resolveGeminiApiKey,
+  resolveGeminiModel,
+  type GeminiPart,
+} from '@/app/api/_lib/gemini'
 
 // QA ART DIRECTOR — the review half of the reverse two-call tile pipeline.
 //
@@ -10,8 +19,6 @@ import { NextRequest, NextResponse } from 'next/server'
 // tiles? If it's clean it APPROVES; otherwise it returns a concise fix report
 // that the image model uses to repaint. This catches the cohesion problems a
 // single blind generation can't see.
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
-
 interface Review {
   ok: boolean
   issues: string[]
@@ -64,20 +71,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
+    const geminiKey = resolveGeminiApiKey(apiKey)
 
-    if (!openRouterKey) {
+    if (!geminiKey) {
       return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
+        { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
 
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
+    const modelId = resolveGeminiModel(model)
 
     const systemPrompt = `You are a SENIOR ENVIRONMENT / TILESET ARTIST doing the final QA pass on a generated 2D-platformer tileset before it ships into the engine. You have the authority to REJECT work, and the experience to not nitpick natural hand-painted texture.
 
@@ -124,53 +127,38 @@ Review the attached platform preview${
         : ''
     } and return your verdict as strict JSON.`
 
-    const content: Array<Record<string, unknown>> = [
-      { type: 'image_url', image_url: { url: previewImage } },
+    const parts: GeminiPart[] = [
+      { text: `System instructions:\n${systemPrompt}` },
+      dataUrlToGeminiPart(previewImage),
     ]
     if (typeof sheetImage === 'string' && sheetImage.startsWith('data:image/')) {
-      content.push({ type: 'image_url', image_url: { url: sheetImage } })
+      parts.push(dataUrlToGeminiPart(sheetImage))
     }
-    content.push({ type: 'text', text: userText })
+    parts.push({ text: userText })
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Tile QA',
-      },
-      body: JSON.stringify({
+    let data: unknown
+    try {
+      data = await callGeminiGenerateContent({
+        apiKey: geminiKey,
         model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content },
-        ],
-        max_tokens: 600,
-        // Low temperature: this is a judgment call, we want consistency.
-        temperature: 0.2,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to review tileset' },
-        { status: response.status }
-      )
+        parts,
+        generationConfig: {
+          maxOutputTokens: 600,
+          // Low temperature: this is a judgment call, we want consistency.
+          temperature: 0.2,
+        },
+      })
+    } catch (error) {
+      if (error instanceof GeminiApiError) {
+        return NextResponse.json(
+          { error: error.message || 'Failed to review tileset' },
+          { status: error.status }
+        )
+      }
+      throw error
     }
 
-    const data = await response.json()
-    const raw = data.choices?.[0]?.message?.content
-    const text =
-      typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw)
-          ? raw
-              .map((p: { text?: string }) => (typeof p?.text === 'string' ? p.text : ''))
-              .join('')
-          : ''
-
+    const text = extractGeminiText(data)
     const review = parseReview(text)
     if (!review) {
       // Don't block the user on a parse failure — treat as approved.
