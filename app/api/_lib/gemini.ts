@@ -24,12 +24,6 @@ export type GeminiPart = GeminiTextPart | GeminiInlinePart
 export type GeminiGenerationConfig = {
   temperature?: number
   maxOutputTokens?: number
-  responseFormat?: {
-    image?: {
-      aspectRatio?: string
-      imageSize?: string
-    }
-  }
 }
 
 export type GeminiCallOptions = {
@@ -98,24 +92,12 @@ export function imageGenerationConfig(
   aspectRatio?: string,
   model?: string
 ): GeminiGenerationConfig {
-  const image: NonNullable<
-    NonNullable<GeminiGenerationConfig['responseFormat']>['image']
-  > = {}
-
-  if (aspectRatio) image.aspectRatio = aspectRatio
-  if (model === 'gemini-3-pro-image' || model === 'gemini-3.1-flash-image') {
-    image.imageSize = '1K'
-  }
-
-  return {
-    ...(Object.keys(image).length
-      ? {
-          responseFormat: {
-            image,
-          },
-        }
-      : {}),
-  }
+  void aspectRatio
+  void model
+  // The Gemini REST endpoint rejects SDK-style image response fields such as
+  // responseFormat and responseModalities in generationConfig. Keep image sizing
+  // guidance in the prompt text instead of sending unsupported schema fields.
+  return {}
 }
 
 export async function callGeminiGenerateContent(

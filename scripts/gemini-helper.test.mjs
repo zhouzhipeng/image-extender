@@ -87,17 +87,13 @@ test('extracts image and text from Gemini generateContent responses', async () =
   assert.equal(helper.extractGeminiText(response), 'first line\nsecond line')
 })
 
-test('image generation config omits responseModalities for REST calls', async () => {
+test('image generation config omits unsupported REST image response fields', async () => {
   const helper = await loadHelper()
   const config = JSON.parse(
     JSON.stringify(helper.imageGenerationConfig('16:9', 'gemini-3.1-flash-image'))
   )
 
   assert.equal(Object.hasOwn(config, 'responseModalities'), false)
-  assert.deepEqual(config.responseFormat, {
-    image: {
-      aspectRatio: '16:9',
-      imageSize: '1K',
-    },
-  })
+  assert.equal(Object.hasOwn(config, 'responseFormat'), false)
+  assert.deepEqual(config, {})
 })
