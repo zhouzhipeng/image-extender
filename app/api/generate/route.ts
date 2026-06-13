@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  callGeminiGenerateContent,
+  callImageGenerateContent,
   dataUrlToGeminiPart,
   extractGeminiImage,
   extractGeminiText,
   GeminiApiError,
   imageGenerationConfig,
+  isLocalGptImageModel,
   resolveGeminiApiKey,
-  resolveGeminiModel,
+  resolveImageModel,
   type GeminiPart,
 } from '@/app/api/_lib/gemini'
 
@@ -86,16 +87,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const geminiKey = resolveGeminiApiKey(apiKey)
+    const modelId = resolveImageModel(model)
+    const usesLocalGpt = isLocalGptImageModel(modelId)
+    const geminiKey = usesLocalGpt ? undefined : resolveGeminiApiKey(apiKey)
 
-    if (!geminiKey) {
+    if (!usesLocalGpt && !geminiKey) {
       return NextResponse.json(
         { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
-
-    const modelId = resolveGeminiModel(model)
 
     // Art style descriptions
     const artStyleDescriptions: { [key: string]: string } = {
@@ -1196,10 +1197,12 @@ ${
 
     let data: unknown
     try {
-      data = await callGeminiGenerateContent({
+      data = await callImageGenerateContent({
         apiKey: geminiKey,
         model: modelId,
         parts: geminiParts,
+        outputWidth: width,
+        outputHeight: height,
         generationConfig: {
           ...imageGenerationConfig(
             supportedAspectRatioForSize(width, height),

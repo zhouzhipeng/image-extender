@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  callGeminiGenerateContent,
+  callImageGenerateContent,
   dataUrlToGeminiPart,
   extractGeminiImage,
   GeminiApiError,
+  isLocalGptImageModel,
   resolveGeminiApiKey,
-  resolveGeminiModel,
+  resolveImageModel,
 } from '@/app/api/_lib/gemini'
 export async function POST(request: NextRequest) {
   try {
@@ -32,16 +33,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const geminiKey = resolveGeminiApiKey(apiKey)
+    const modelId = resolveImageModel(model)
+    const usesLocalGpt = isLocalGptImageModel(modelId)
+    const geminiKey = usesLocalGpt ? undefined : resolveGeminiApiKey(apiKey)
 
-    if (!geminiKey) {
+    if (!usesLocalGpt && !geminiKey) {
       return NextResponse.json(
         { error: 'Gemini API key missing. Add one in Settings.' },
         { status: 401 }
       )
     }
-
-    const modelId = resolveGeminiModel(model)
 
     // Create inpainting prompt
     const directionDescriptions = {
@@ -231,10 +232,24 @@ KEY INSTRUCTIONS:
 
     let data: unknown
     try {
-      data = await callGeminiGenerateContent({
+      data = await callImageGenerateContent({
         apiKey: geminiKey,
         model: modelId,
         parts: [dataUrlToGeminiPart(expandedCanvas), { text: prompt }],
+        outputWidth:
+          extensionInfo?.newWidth ??
+          (isChunked && chunkInfo
+            ? chunkInfo.direction === 'left' || chunkInfo.direction === 'right'
+              ? chunkInfo.chunkWidth + chunkInfo.extensionSize
+              : chunkInfo.originalWidth
+            : undefined),
+        outputHeight:
+          extensionInfo?.newHeight ??
+          (isChunked && chunkInfo
+            ? chunkInfo.direction === 'up' || chunkInfo.direction === 'down'
+              ? chunkInfo.chunkHeight + chunkInfo.extensionSize
+              : chunkInfo.originalHeight
+            : undefined),
         generationConfig: {
           maxOutputTokens: 2000,
           temperature: attempt === 0 ? 0.3 : attempt === 1 ? 0.5 : 0.7,

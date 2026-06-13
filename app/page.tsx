@@ -13,7 +13,7 @@ import { ResultActions, VariantSelector } from '@/app/components/VariantSelector
 import { Workspace } from '@/app/components/Workspace'
 import { Candidate, Direction, EXTENSION_PERCENT, Mode, STORAGE_KEY, STORAGE_MODE, STORAGE_MODEL } from '@/app/lib/app'
 import { findStyleLabel } from '@/app/lib/artStyles'
-import { DEFAULT_MODEL, MODELS, getModelConfig, skipsArtDirectorReview } from '@/app/lib/models'
+import { DEFAULT_MODEL, MODELS, getModelConfig, isLocalGptModel, skipsArtDirectorReview } from '@/app/lib/models'
 import { LAYER_ORDER, LAYER_ROLES, LayerRole, PARALLAX_MAX_AUTO_STEPS, ParallaxLayer, WORKFLOW_ORDER, createDefaultLayers, getRecommendedLayerIndex, getWorkflowPrerequisite } from '@/app/lib/parallax'
 import { PROP_BATCH, PROP_BATCH_COLS, PROP_BATCH_H, PROP_BATCH_ROWS, PROP_BATCH_W, PROP_TILE_SIZE, PropItem, nextPropId, propAtlasLayout, resolvePropNames } from '@/app/lib/props'
 import { SPRITE_ANIMATIONS, SPRITE_FRAME_COUNT, SPRITE_FRAME_SIZE, SPRITE_GRID_COLS, SPRITE_GRID_ROWS, SPRITE_SHEET_H, SPRITE_SHEET_W, SPRITE_STRIP_H, SPRITE_STRIP_W, SpriteAnimType, SpriteFrame, SpriteSheet, createEmptySpriteSheet } from '@/app/lib/sprite'
@@ -192,6 +192,7 @@ export default function Home() {
   // "hydrating" state so we don't flash the modal before reading storage.
   const [apiKey, setApiKey] = useState('')
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL)
+  const selectedModelUsesLocalGpt = isLocalGptModel(selectedModel)
   const skipArtDirectorReview = skipsArtDirectorReview(selectedModel)
   const [hydrated, setHydrated] = useState(false)
   const [showApiKeyModal, setShowApiKeyModal] = useState(false)
@@ -220,14 +221,10 @@ export default function Home() {
       ) {
         setModeState(savedMode)
       }
-      if (!k) {
-        setApiKeyRequired(true)
-        setShowApiKeyModal(true)
-      }
     } catch {
-      // localStorage unavailable (private mode, etc.) — show modal anyway.
-      setApiKeyRequired(true)
-      setShowApiKeyModal(true)
+      // localStorage unavailable (private mode, etc.). Defer key prompting
+      // until a Gemini-backed request is actually made, so local models remain
+      // usable without a key.
     } finally {
       setHydrated(true)
     }
@@ -279,6 +276,7 @@ export default function Home() {
   }
 
   const ensureCanGenerate = (): boolean => {
+    if (selectedModelUsesLocalGpt) return true
     // If no key and we're in required mode, re-open the modal instead of
     // making a request that would fail with 401.
     if (!apiKey && apiKeyRequired) {
@@ -511,6 +509,7 @@ export default function Home() {
   const deriveSceneBrief = useCallback(
     async (anchorPrompt: string) => {
       if (!anchorPrompt.trim()) return
+      if (isLocalGptModel(selectedModel)) return
       setSceneBriefLoading(true)
       try {
         const response = await fetch('/api/scene-brief', {
@@ -1284,6 +1283,7 @@ export default function Home() {
     previewImage: string,
     sheetImage: string | null
   ): Promise<{ ok: boolean; issues: string[]; fix: string } | null> => {
+    if (selectedModelUsesLocalGpt) return null
     try {
       const res = await fetch('/api/tile-review', {
         method: 'POST',
@@ -1902,6 +1902,7 @@ export default function Home() {
     count: number,
     items: PropItem[]
   ): Promise<{ category: string; description: string }[]> => {
+    if (selectedModelUsesLocalGpt) return []
     try {
       const res = await fetch('/api/prop-brief', {
         method: 'POST',
@@ -2553,6 +2554,7 @@ export default function Home() {
     anchorImage: string | null
   ): Promise<{ ok: boolean; issues: string[]; fix: string } | null> => {
     if (!sheetImage) return null
+    if (selectedModelUsesLocalGpt) return null
     try {
       const res = await fetch('/api/sprite-review', {
         method: 'POST',

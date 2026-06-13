@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icons } from '@/app/components/icons'
 import { ART_STYLE_GROUPS } from '@/app/lib/artStyles'
-import { MODELS, maskKey } from '@/app/lib/models'
+import { MODELS, isLocalGptModel, maskKey } from '@/app/lib/models'
 
 export function SettingsDrawer({
   open,
@@ -28,6 +28,8 @@ export function SettingsDrawer({
   selectedModel: string
   setSelectedModel: (v: string) => void
 }) {
+  const localGptSelected = isLocalGptModel(selectedModel)
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -107,8 +109,32 @@ export function SettingsDrawer({
             </div>
           </Section>
 
-          <Section title="Gemini API key">
-            {apiKey ? (
+          <Section title={localGptSelected ? 'Local GPT' : 'Gemini API key'}>
+            {localGptSelected ? (
+              <div
+                className="flex items-start gap-3 rounded-[var(--radius-sm)] p-3"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded"
+                  style={{ background: 'var(--accent-bg)', color: 'var(--accent)' }}
+                >
+                  <Icons.Sparkle size={14} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium">No Gemini key required</div>
+                  <div
+                    className="mt-0.5 text-[11px] leading-snug"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    Uses the local Codex image generator available on this machine.
+                  </div>
+                </div>
+              </div>
+            ) : apiKey ? (
               <div
                 className="flex items-center gap-3 rounded-[var(--radius-sm)] p-3"
                 style={{

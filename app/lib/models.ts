@@ -14,8 +14,16 @@ export type ModelOption = {
   approxSecondsPerCall: number
 }
 
+export const LOCAL_GPT_IMAGE_MODEL = 'local/gpt-image-2'
 
 export const MODELS: ModelOption[] = [
+  {
+    value: LOCAL_GPT_IMAGE_MODEL,
+    label: 'Local GPT Image',
+    hint: 'Local Codex image generation - no Gemini key',
+    maxAttempts: 1,
+    approxSecondsPerCall: 90,
+  },
   {
     value: 'gemini-3-pro-image',
     label: 'Gemini 3 Pro Image',
@@ -50,8 +58,12 @@ export function getModelConfig(value: string): ModelOption {
   )
 }
 
+export function isLocalGptModel(value: string): boolean {
+  return value === LOCAL_GPT_IMAGE_MODEL
+}
+
 export function skipsArtDirectorReview(value: string): boolean {
-  return false
+  return isLocalGptModel(value)
 }
 
 
